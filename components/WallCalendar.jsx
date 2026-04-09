@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   format,
   addMonths,
@@ -15,8 +15,10 @@ import {
   isWithinInterval,
   isBefore,
   isAfter,
+  parseISO,
+  areIntervalsOverlapping,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
@@ -51,10 +53,61 @@ export default function WallCalendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [direction, setDirection] = useState(0);
   
-  // New state for date selection
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [hoverDate, setHoverDate] = useState(null);
+  
+  // Notes state
+  const [notes, setNotes] = useState([]);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('idle');
+
+  // Load notes from local storage on mount
+  useEffect(() => {
+    const savedNotes = localStorage.getItem('calendar_notes');
+    if (savedNotes) {
+      try {
+        const parsed = JSON.parse(savedNotes);
+        if (Array.isArray(parsed)) {
+          setNotes(parsed);
+        } else {
+          // Migrate old format if necessary
+          const migrated = [];
+          for (const [key, text] of Object.entries(parsed)) {
+            if (typeof text === 'string' && text.trim()) {
+              if (key.includes('_')) {
+                const [start, end] = key.split('_');
+                migrated.push({ id: Math.random().toString(36).substring(2, 9), startDate: start, endDate: end, text });
+              } else {
+                migrated.push({ id: Math.random().toString(36).substring(2, 9), startDate: key, endDate: key, text });
+              }
+            }
+          }
+          setNotes(migrated);
+        }
+      } catch (e) {
+        console.error('Failed to parse notes', e);
+      }
+    }
+    setIsLoaded(true);
+  }, []);
+
+  // Save notes to local storage when they change
+  useEffect(() => {
+    if (isLoaded) {
+      setSaveStatus('saving');
+      const timeout = setTimeout(() => {
+        const cleanedNotes = notes.filter(n => n.text.trim() !== '');
+        if (cleanedNotes.length !== notes.length) {
+           setNotes(cleanedNotes);
+        }
+        localStorage.setItem('calendar_notes', JSON.stringify(cleanedNotes));
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [notes, isLoaded]);
 
   const nextMonth = () => {
     setDirection(1);
@@ -66,7 +119,6 @@ export default function WallCalendar() {
     setCurrentDate(subMonths(currentDate, 1));
   };
 
-  // Handle clicking on a date
   const onDateClick = (day) => {
     if (!startDate || (startDate && endDate)) {
       setStartDate(day);
@@ -80,13 +132,63 @@ export default function WallCalendar() {
     }
   };
 
-  // Handle hovering over a date for range preview
   const onDateHover = (day) => {
     if (startDate && !endDate) {
       setHoverDate(day);
     } else {
       setHoverDate(null);
     }
+  };
+
+  const currentMonthKey = format(currentDate, 'yyyy-MM');
+  const selectedStartStr = startDate ? format(startDate, 'yyyy-MM-dd') : currentMonthKey;
+  const selectedEndStr = startDate ? (endDate ? format(endDate, 'yyyy-MM-dd') : format(startDate, 'yyyy-MM-dd')) : currentMonthKey;
+
+  const exactMatchNote = notes.find(n => n.startDate === selectedStartStr && n.endDate === selectedEndStr);
+
+  const overlappingNotes = notes.filter(n => {
+    if (n.id === exactMatchNote?.id) return false;
+    if (!startDate) return n.startDate === currentMonthKey; // General month notes
+    if (n.startDate.length === 7) return false; // Skip general month notes when a date is selected
+
+    try {
+      const nStart = parseISO(n.startDate);
+      const nEnd = parseISO(n.endDate);
+      const sStart = startDate;
+      const sEnd = endDate || startDate;
+
+      return areIntervalsOverlapping(
+        { start: nStart, end: nEnd },
+        { start: sStart, end: sEnd },
+        { inclusive: true }
+      );
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const handleExactMatchChange = (e) => {
+    const text = e.target.value;
+    if (exactMatchNote) {
+      setNotes(prev => prev.map(n => n.id === exactMatchNote.id ? { ...n, text } : n));
+    } else {
+      if (text.trim() === '') return;
+      const newNote = {
+        id: Math.random().toString(36).substring(2, 9),
+        startDate: selectedStartStr,
+        endDate: selectedEndStr,
+        text
+      };
+      setNotes(prev => [...prev, newNote]);
+    }
+  };
+
+  const handleUpdateNote = (id, newText) => {
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, text: newText } : n));
+  };
+
+  const handleDeleteNote = (id) => {
+    setNotes(prev => prev.filter(n => n.id !== id));
   };
 
   const monthIndex = currentDate.getMonth();
@@ -124,7 +226,6 @@ export default function WallCalendar() {
       const isCurrentMonth = isSameMonth(currentLoopDate, monthStart);
       const isToday = isSameDay(currentLoopDate, new Date());
 
-      // Selection logic checks
       const isSelectedStart = startDate && isSameDay(currentLoopDate, startDate);
       const isSelectedEnd = endDate && isSameDay(currentLoopDate, endDate);
       const isWithinSelection = startDate && endDate && isWithinInterval(currentLoopDate, { start: startDate, end: endDate });
@@ -133,6 +234,18 @@ export default function WallCalendar() {
         (isBefore(currentLoopDate, startDate) && isAfter(currentLoopDate, hoverDate)) ||
         isSameDay(currentLoopDate, hoverDate)
       );
+
+      // Check if this day has a note
+      const hasNote = notes.some(n => {
+        if (n.startDate.length === 7) return false;
+        try {
+          const nStart = parseISO(n.startDate);
+          const nEnd = parseISO(n.endDate);
+          return currentLoopDate >= nStart && currentLoopDate <= nEnd;
+        } catch (e) {
+          return false;
+        }
+      });
 
       days.push(
         <div
@@ -144,7 +257,6 @@ export default function WallCalendar() {
           onClick={() => onDateClick(cloneDay)}
           onMouseEnter={() => onDateHover(cloneDay)}
         >
-          {/* Background highlight for range */}
           {(isWithinSelection || isHoverRange) && !isSelectedStart && !isSelectedEnd && (
             <div className="absolute inset-0 bg-blue-50/80 my-1" />
           )}
@@ -165,6 +277,14 @@ export default function WallCalendar() {
           >
             {formattedDate}
           </span>
+
+          {/* Note Indicator Dot */}
+          {hasNote && (
+            <div className={cn(
+              "absolute bottom-1 sm:bottom-1.5 w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full z-10 transition-colors",
+              isSelectedStart || isSelectedEnd ? "bg-white" : "bg-blue-400"
+            )} />
+          )}
         </div>
       );
 
@@ -182,6 +302,32 @@ export default function WallCalendar() {
 
   return (
     <div className="w-full max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 flex flex-col items-center font-sans">
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background-color: #e5e7eb;
+          border-radius: 20px;
+        }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+          background-color: #d1d5db;
+        }
+      `}</style>
+
+      {/* Spiral Binding Visual */}
+      <div className="flex justify-center space-x-4 sm:space-x-8 mb-[-16px] z-20 relative px-8 w-full max-w-5xl pointer-events-none">
+        {Array.from({ length: 16 }).map((_, i) => (
+          <div key={i} className="flex flex-col items-center">
+            <div className="w-2.5 h-10 sm:w-3.5 sm:h-12 bg-gradient-to-b from-gray-200 via-white to-gray-300 rounded-full border border-gray-300 shadow-[inset_0_2px_4px_rgba(0,0,0,0.1),0_2px_4px_rgba(0,0,0,0.1)] transform -rotate-6"></div>
+            <div className="w-3 h-3 sm:w-4 sm:h-4 bg-gray-800 rounded-full mt-[-8px] sm:mt-[-10px] shadow-inner opacity-40"></div>
+          </div>
+        ))}
+      </div>
+
       <div className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.08)] overflow-hidden w-full max-w-5xl border border-gray-100 flex flex-col relative">
         
         {/* Hero Section */}
@@ -245,37 +391,92 @@ export default function WallCalendar() {
           {/* Notes Section */}
           <div className="w-full md:w-1/3 p-6 sm:p-8 bg-gray-50/50 flex flex-col relative border-b md:border-b-0 md:border-r border-gray-100">
             <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-gray-100 p-6 flex flex-col h-full">
-               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">Notes</h3>
-               
-               <div className="mb-6">
-                 <h4 className="text-lg font-semibold text-gray-900">
-                   {startDate
-                     ? endDate
-                       ? `${format(startDate, 'MMM d')} - ${format(endDate, 'MMM d')}`
-                       : format(startDate, 'MMM d, yyyy')
-                     : `${format(currentDate, 'MMMM yyyy')}`}
-                 </h4>
-                 <p className="text-sm text-gray-500 mt-1">
-                   {startDate ? 'Selected Range' : 'General Notes'}
-                 </p>
-               </div>
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Notes</h3>
+                <div className="h-4 flex items-center">
+                  {saveStatus === 'saved' && <span className="text-xs text-emerald-500 font-medium flex items-center gap-1"><Check className="w-3 h-3"/> Saved</span>}
+                  {saveStatus === 'saving' && <span className="text-xs text-gray-400 font-medium">Saving...</span>}
+                </div>
+              </div>
+              
+              <div className="mb-6">
+                <h4 className="text-lg font-semibold text-gray-900 flex items-center gap-2 flex-wrap">
+                  {startDate
+                    ? endDate
+                      ? `${format(startDate, 'MMM d')} - ${format(endDate, 'MMM d')}`
+                      : format(startDate, 'MMM d, yyyy')
+                    : `${format(currentDate, 'MMMM yyyy')}`}
+                  
+                  {(overlappingNotes.length > 0 || (exactMatchNote && exactMatchNote.text.trim())) && (
+                    <span className="bg-blue-100 text-blue-700 text-xs py-0.5 px-2 rounded-full font-medium whitespace-nowrap">
+                      {overlappingNotes.length + (exactMatchNote && exactMatchNote.text.trim() ? 1 : 0)} note{(overlappingNotes.length + (exactMatchNote && exactMatchNote.text.trim() ? 1 : 0)) !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </h4>
+                <p className="text-sm text-gray-500 mt-1">{startDate ? 'Selected Range' : 'General Notes'}</p>
+              </div>
 
-               <p className="text-sm text-gray-500 flex-grow">Notes feature coming in the next step...</p>
+              <div className="flex-grow flex flex-col overflow-y-auto pr-3 -mr-3 custom-scrollbar">
+                {overlappingNotes.length > 0 && (
+                  <div className="mb-6 space-y-4">
+                    {overlappingNotes.map(note => (
+                      <div key={note.id} className="p-4 bg-white rounded-2xl border border-gray-100 shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] transition-all duration-200 relative group">
+                        <div className="flex justify-between items-center mb-3">
+                          <span className="text-xs font-bold text-blue-600 uppercase tracking-wider bg-blue-50 px-2 py-1 rounded-md">
+                            {note.startDate === note.endDate 
+                              ? format(parseISO(note.startDate), 'MMM d, yyyy') 
+                              : `${format(parseISO(note.startDate), 'MMM d')} - ${format(parseISO(note.endDate), 'MMM d')}`}
+                          </span>
+                          <button 
+                            onClick={() => handleDeleteNote(note.id)} 
+                            className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-label="Delete note"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <textarea
+                          value={note.text}
+                          onChange={(e) => handleUpdateNote(note.id, e.target.value)}
+                          className="w-full bg-transparent resize-none focus:outline-none text-gray-700 text-sm leading-relaxed"
+                          rows={Math.max(1, note.text.split('\n').length)}
+                        />
+                      </div>
+                    ))}
+                    
+                    <div className="flex items-center gap-3 py-2">
+                      <div className="h-px bg-gray-200 flex-grow"></div>
+                      <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">Current Selection</span>
+                      <div className="h-px bg-gray-200 flex-grow"></div>
+                    </div>
+                  </div>
+                )}
 
-               {/* Clear Selection Button */}
-               <AnimatePresence>
-                 {(startDate || endDate) && (
-                   <motion.button 
-                     initial={{ opacity: 0, y: 10 }}
-                     animate={{ opacity: 1, y: 0 }}
-                     exit={{ opacity: 0, y: 10 }}
-                     onClick={() => { setStartDate(null); setEndDate(null); }}
-                     className="mt-6 w-full py-2.5 rounded-xl text-sm font-medium text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm flex items-center justify-center gap-2"
-                   >
-                     <X className="w-4 h-4" /> Clear Selection
-                   </motion.button>
-                 )}
-               </AnimatePresence>
+                <div className="relative flex-grow min-h-[150px]">
+                  <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'repeating-linear-gradient(transparent, transparent 31px, #f3f4f6 31px, #f3f4f6 32px)', backgroundAttachment: 'local' }}></div>
+                  <textarea
+                    value={exactMatchNote ? exactMatchNote.text : ''}
+                    onChange={handleExactMatchChange}
+                    placeholder={overlappingNotes.length > 0 ? "Add another note for this specific selection..." : "Write your notes here..."}
+                    className="w-full h-full bg-transparent resize-none focus:outline-none text-gray-700 leading-[32px] pt-1 relative z-10"
+                    style={{ lineHeight: '32px' }}
+                  />
+                </div>
+              </div>
+              
+              <AnimatePresence>
+                {(startDate || endDate) && (
+                  <motion.button 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    onClick={() => { setStartDate(null); setEndDate(null); }}
+                    className="mt-6 w-full py-2.5 rounded-xl text-sm font-medium text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm flex items-center justify-center gap-2"
+                  >
+                    <X className="w-4 h-4" /> Clear Selection
+                  </motion.button>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
