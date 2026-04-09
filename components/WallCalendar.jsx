@@ -23,43 +23,33 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 
+// Helper to get a seasonal image based on month (0-11)
 const getMonthImage = (monthIndex) => {
   const seeds = [
-    'snow,mountain', 'winter,landscape', 'spring,flower', 'green,hill',
-    'nature,water', 'summer,beach', 'ocean,sun', 'forest,sunlight',
-    'autumn,leaves', 'fall,trees', 'frost,nature', 'ice,lake',
+    'snow,mountain', // Jan
+    'winter,landscape', // Feb
+    'spring,flower', // Mar
+    'green,hill', // Apr
+    'nature,water', // May
+    'summer,beach', // Jun
+    'ocean,sun', // Jul
+    'forest,sunlight', // Aug
+    'autumn,leaves', // Sep
+    'fall,trees', // Oct
+    'frost,nature', // Nov
+    'ice,lake', // Dec
   ];
   return `https://picsum.photos/seed/${seeds[monthIndex]}/1200/800`;
 };
 
-const slideVariants = {
-  enter: (direction) => ({
-    x: direction > 0 ? 50 : -50,
-    opacity: 0,
-  }),
-  center: {
-    zIndex: 1,
-    x: 0,
-    opacity: 1,
-  },
-  exit: (direction) => ({
-    zIndex: 0,
-    x: direction < 0 ? 50 : -50,
-    opacity: 0,
-  }),
-};
-
 export default function WallCalendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [direction, setDirection] = useState(0);
-  
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [hoverDate, setHoverDate] = useState(null);
-  
-  // Notes state
   const [notes, setNotes] = useState([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [direction, setDirection] = useState(0); // For animation
   const [saveStatus, setSaveStatus] = useState('idle');
 
   // Load notes from local storage on mount
@@ -69,9 +59,10 @@ export default function WallCalendar() {
       try {
         const parsed = JSON.parse(savedNotes);
         if (Array.isArray(parsed)) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setNotes(parsed);
         } else {
-          // Migrate old format if necessary
+          // Migrate old format
           const migrated = [];
           for (const [key, text] of Object.entries(parsed)) {
             if (typeof text === 'string' && text.trim()) {
@@ -95,6 +86,7 @@ export default function WallCalendar() {
   // Save notes to local storage when they change
   useEffect(() => {
     if (isLoaded) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSaveStatus('saving');
       const timeout = setTimeout(() => {
         const cleanedNotes = notes.filter(n => n.text.trim() !== '');
@@ -148,6 +140,7 @@ export default function WallCalendar() {
 
   const overlappingNotes = notes.filter(n => {
     if (n.id === exactMatchNote?.id) return false;
+    if (!n.text || n.text.trim() === '') return false;
     if (!startDate) return n.startDate === currentMonthKey; // General month notes
     if (n.startDate.length === 7) return false; // Skip general month notes when a date is selected
 
@@ -191,9 +184,28 @@ export default function WallCalendar() {
     setNotes(prev => prev.filter(n => n.id !== id));
   };
 
-  const monthIndex = currentDate.getMonth();
+  const renderHeader = () => {
+    return (
+      <div className="absolute bottom-6 right-6 sm:bottom-8 sm:right-8 flex gap-2 sm:gap-3 z-20">
+        <button
+          onClick={prevMonth}
+          className="p-2 sm:p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white border border-white/10"
+          aria-label="Previous Month"
+        >
+          <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+        </button>
+        <button
+          onClick={nextMonth}
+          className="p-2 sm:p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white border border-white/10"
+          aria-label="Next Month"
+        >
+          <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
+        </button>
+      </div>
+    );
+  };
 
-  function renderDays() {
+  const renderDays = () => {
     const days = [];
     const startDateOfWeek = startOfWeek(currentDate);
 
@@ -204,10 +216,11 @@ export default function WallCalendar() {
         </div>
       );
     }
-    return <div className="grid grid-cols-7 mb-2">{days}</div>;
-  }
 
-  function renderCells() {
+    return <div className="grid grid-cols-7 mb-2">{days}</div>;
+  };
+
+  const renderCells = () => {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(monthStart);
     const startDateOfWeek = startOfWeek(monthStart);
@@ -216,28 +229,34 @@ export default function WallCalendar() {
     const rows = [];
     let days = [];
     
+    // Calculate total days to render
     const totalDays = Math.round((endDateOfWeek.getTime() - startDateOfWeek.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
     for (let i = 0; i < totalDays; i++) {
       const currentLoopDate = addDays(startDateOfWeek, i);
       const formattedDate = format(currentLoopDate, 'd');
       const cloneDay = currentLoopDate;
+      const dayKey = format(currentLoopDate, 'yyyy-MM-dd');
+
+      const isSelectedStart = startDate && isSameDay(currentLoopDate, startDate);
+      const isSelectedEnd = endDate && isSameDay(currentLoopDate, endDate);
+      const isWithinSelection =
+        startDate && endDate && isWithinInterval(currentLoopDate, { start: startDate, end: endDate });
+      const isHoverRange =
+        startDate &&
+        !endDate &&
+        hoverDate &&
+        ((isAfter(currentLoopDate, startDate) && isBefore(currentLoopDate, hoverDate)) ||
+          (isBefore(currentLoopDate, startDate) && isAfter(currentLoopDate, hoverDate)) ||
+          isSameDay(currentLoopDate, hoverDate));
 
       const isCurrentMonth = isSameMonth(currentLoopDate, monthStart);
       const isToday = isSameDay(currentLoopDate, new Date());
 
-      const isSelectedStart = startDate && isSameDay(currentLoopDate, startDate);
-      const isSelectedEnd = endDate && isSameDay(currentLoopDate, endDate);
-      const isWithinSelection = startDate && endDate && isWithinInterval(currentLoopDate, { start: startDate, end: endDate });
-      const isHoverRange = startDate && !endDate && hoverDate && (
-        (isAfter(currentLoopDate, startDate) && isBefore(currentLoopDate, hoverDate)) ||
-        (isBefore(currentLoopDate, startDate) && isAfter(currentLoopDate, hoverDate)) ||
-        isSameDay(currentLoopDate, hoverDate)
-      );
-
       // Check if this day has a note
       const hasNote = notes.some(n => {
         if (n.startDate.length === 7) return false;
+        if (!n.text || n.text.trim() === '') return false;
         try {
           const nStart = parseISO(n.startDate);
           const nEnd = parseISO(n.endDate);
@@ -252,11 +271,12 @@ export default function WallCalendar() {
           key={currentLoopDate.toString()}
           className={cn(
             'relative flex flex-col items-center justify-center h-12 sm:h-14 cursor-pointer transition-all duration-200 group',
-            !isCurrentMonth ? 'text-gray-300' : 'text-gray-700'
+            !isCurrentMonth ? 'text-gray-300' : 'text-gray-700',
           )}
           onClick={() => onDateClick(cloneDay)}
           onMouseEnter={() => onDateHover(cloneDay)}
         >
+          {/* Background highlight for range */}
           {(isWithinSelection || isHoverRange) && !isSelectedStart && !isSelectedEnd && (
             <div className="absolute inset-0 bg-blue-50/80 my-1" />
           )}
@@ -277,7 +297,7 @@ export default function WallCalendar() {
           >
             {formattedDate}
           </span>
-
+          
           {/* Note Indicator Dot */}
           {hasNote && (
             <div className={cn(
@@ -298,7 +318,30 @@ export default function WallCalendar() {
       }
     }
     return <div className="flex flex-col">{rows}</div>;
-  }
+  };
+
+  const monthIndex = currentDate.getMonth();
+
+  const variants = {
+    enter: (direction) => {
+      return {
+        x: direction > 0 ? 50 : -50,
+        opacity: 0,
+      };
+    },
+    center: {
+      zIndex: 1,
+      x: 0,
+      opacity: 1,
+    },
+    exit: (direction) => {
+      return {
+        zIndex: 0,
+        x: direction < 0 ? 50 : -50,
+        opacity: 0,
+      };
+    },
+  };
 
   return (
     <div className="w-full max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 flex flex-col items-center font-sans">
@@ -322,12 +365,15 @@ export default function WallCalendar() {
       <div className="flex justify-center space-x-4 sm:space-x-8 mb-[-16px] z-20 relative px-8 w-full max-w-5xl pointer-events-none">
         {Array.from({ length: 16 }).map((_, i) => (
           <div key={i} className="flex flex-col items-center">
+            {/* The wire loop */}
             <div className="w-2.5 h-10 sm:w-3.5 sm:h-12 bg-gradient-to-b from-gray-200 via-white to-gray-300 rounded-full border border-gray-300 shadow-[inset_0_2px_4px_rgba(0,0,0,0.1),0_2px_4px_rgba(0,0,0,0.1)] transform -rotate-6"></div>
+            {/* The hole in the paper */}
             <div className="w-3 h-3 sm:w-4 sm:h-4 bg-gray-800 rounded-full mt-[-8px] sm:mt-[-10px] shadow-inner opacity-40"></div>
           </div>
         ))}
       </div>
 
+      {/* Calendar Card */}
       <div className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.08)] overflow-hidden w-full max-w-5xl border border-gray-100 flex flex-col relative">
         
         {/* Hero Section */}
@@ -336,7 +382,7 @@ export default function WallCalendar() {
             <motion.div
               key={currentDate.toString()}
               custom={direction}
-              variants={slideVariants}
+              variants={variants}
               initial="enter"
               animate="center"
               exit="exit"
@@ -354,35 +400,17 @@ export default function WallCalendar() {
                 referrerPolicy="no-referrer"
                 priority
               />
+              {/* Smooth Gradient Overlay (Bottom Up) */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-0" />
               
+              {/* Text Container */}
               <div className="absolute bottom-6 left-6 sm:bottom-8 sm:left-8 text-left z-10">
-                <div className="text-4xl sm:text-6xl font-bold tracking-tight leading-none text-white drop-shadow-md">
-                  {format(currentDate, 'MMMM')}
-                </div>
-                <div className="text-xl sm:text-2xl font-medium text-white/80 mt-1 sm:mt-2 drop-shadow-md">
-                  {format(currentDate, 'yyyy')}
-                </div>
+                <div className="text-4xl sm:text-6xl font-bold tracking-tight leading-none text-white drop-shadow-md">{format(currentDate, 'MMMM')}</div>
+                <div className="text-xl sm:text-2xl font-medium text-white/80 mt-1 sm:mt-2 drop-shadow-md">{format(currentDate, 'yyyy')}</div>
               </div>
             </motion.div>
           </AnimatePresence>
-
-          <div className="absolute bottom-6 right-6 sm:bottom-8 sm:right-8 flex gap-2 sm:gap-3 z-20">
-            <button
-              onClick={prevMonth}
-              className="p-2 sm:p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white border border-white/10"
-              aria-label="Previous Month"
-            >
-              <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
-            </button>
-            <button
-              onClick={nextMonth}
-              className="p-2 sm:p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all text-white border border-white/10"
-              aria-label="Next Month"
-            >
-              <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
-            </button>
-          </div>
+          {renderHeader()}
         </div>
 
         {/* Bottom Section: Notes & Grid */}
@@ -453,6 +481,7 @@ export default function WallCalendar() {
                 )}
 
                 <div className="relative flex-grow min-h-[150px]">
+                  {/* Lined paper background effect */}
                   <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'repeating-linear-gradient(transparent, transparent 31px, #f3f4f6 31px, #f3f4f6 32px)', backgroundAttachment: 'local' }}></div>
                   <textarea
                     value={exactMatchNote ? exactMatchNote.text : ''}
@@ -464,6 +493,7 @@ export default function WallCalendar() {
                 </div>
               </div>
               
+              {/* Clear Selection Button */}
               <AnimatePresence>
                 {(startDate || endDate) && (
                   <motion.button 
