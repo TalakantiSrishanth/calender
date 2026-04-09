@@ -52,7 +52,7 @@ export default function WallCalendar() {
     <div className="w-full max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 flex flex-col items-center font-sans">
       <div className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.08)] overflow-hidden w-full max-w-5xl border border-gray-100 flex flex-col relative">
         
-        {/* Hero Section */}
+
         <div className="relative h-48 sm:h-64 md:h-80 w-full overflow-hidden bg-gray-900 flex-shrink-0">
           <AnimatePresence initial={false} custom={direction}>
             <motion.div
@@ -89,7 +89,6 @@ export default function WallCalendar() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Navigation Header */}
           <div className="absolute bottom-6 right-6 sm:bottom-8 sm:right-8 flex gap-2 sm:gap-3 z-20">
             <button
               onClick={prevMonth}
